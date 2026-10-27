@@ -1,5 +1,5 @@
 
-"""CSV data logging for SPECTRE."""
+"""Buffered CSV data logging for SPECTRE."""
 
 import csv
 from pathlib import Path
@@ -18,48 +18,110 @@ CSV_FIELDS = [
 ]
 
 
-def log_readings(readings: list[SensorReading]) -> Path | None:
-    """Append sensor readings to the configured CSV log."""
-    settings = load_settings()
-    logging_settings = settings["logging"]
+class SensorLogger:
+    """Keep a CSV file open while collecting sensor readings."""
 
-    if not logging_settings["enabled"]:
-        return None
+    def __init__(self) -> None:
+        settings = load_settings()
+        logging_settings = settings["logging"]
 
-    data_dir = Path(__file__).parent / logging_settings["directory"]
-    log_file = data_dir / logging_settings["filename"]
+        self.enabled = logging_settings["enabled"]
+        self.log_file = None
+        self.writer = None
+        self.path = None
 
-    data_dir.mkdir(parents=True, exist_ok=True)
+        if not self.enabled:
+            return
 
-    needs_header = not log_file.exists() or log_file.stat().st_size == 0
+        self.path = (
+            Path(__file__).parent
+            / logging_settings["directory"]
+            / logging_settings["filename"]
+        )
 
-    with log_file.open("a", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        needs_header = (
+            not self.path.exists()
+            or self.path.stat().st_size == 0
+        )
+
+        self.log_file = self.path.open(
+            "a",
+            newline="",
+            encoding="utf-8",
+            buffering=1024 * 1024,
+        )
+
+        self.writer = csv.DictWriter(
+            self.log_file,
+            fieldnames=CSV_FIELDS,
+        )
 
         if needs_header:
-            writer.writeheader()
+            self.writer.writeheader()
+            self.log_file.flush()
 
-        for reading in readings:
-            writer.writerow({
+    def log_readings(
+        self,
+        readings: list[SensorReading],
+    ) -> None:
+        """Append a batch of readings without reopening the file."""
+        if not self.enabled or self.writer is None:
+            return
+
+        self.writer.writerows(
+            {
                 "timestamp": reading.timestamp,
                 "sensor": reading.sensor,
                 "measurement": reading.measurement,
                 "value": reading.value,
                 "unit": reading.unit,
                 "simulated": reading.simulated,
-            })
+            }
+            for reading in readings
+        )
 
-    return log_file
+    def flush(self) -> None:
+        """Write buffered data to the operating system."""
+        if self.log_file is not None:
+            self.log_file.flush()
+
+    def close(self) -> None:
+        """Flush and close the CSV file."""
+        if self.log_file is not None:
+            self.log_file.flush()
+            self.log_file.close()
+            self.log_file = None
+            self.writer = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
+def log_readings(
+    readings: list[SensorReading],
+) -> Path | None:
+    """Compatibility helper for logging a single batch."""
+    with SensorLogger() as logger:
+        logger.log_readings(readings)
+        return logger.path
 
 
 if __name__ == "__main__":
     from simulator import generate_readings
 
     readings = generate_readings()
-    saved_path = log_readings(readings)
 
-    if saved_path is None:
-        print("SPECTRE: logging is disabled in config.json.")
-    else:
-        print(f"SPECTRE: logged {len(readings)} simulated readings.")
-        print(f"File: {saved_path.resolve()}")
+    with SensorLogger() as logger:
+        logger.log_readings(readings)
+        logger.flush()
+
+        if logger.enabled:
+            print(f"SPECTRE: logged {len(readings)} simulated readings.")
+            print(f"File: {logger.path.resolve()}")
+        else:
+            print("SPECTRE: logging is disabled in config.json.")
