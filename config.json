@@ -1,0 +1,19 @@
+
+{
+    "application": {
+        "name": "SPECTRE",
+        "version": "0.1.0"
+    },
+    "display": {
+        "temperature_unit": "F",
+        "refresh_seconds": 2
+    },
+    "logging": {
+        "enabled": true,
+        "directory": "data",
+        "filename": "spectre_log.csv"
+    },
+    "hardware": {
+        "mode": "simulation"
+    }
+}

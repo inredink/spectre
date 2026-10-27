@@ -3,11 +3,10 @@
 
 import csv
 from pathlib import Path
+
 from sensors import SensorReading
+from settings import load_settings
 
-
-DATA_DIR = Path("data")
-LOG_FILE = DATA_DIR / "spectre_log.csv"
 
 CSV_FIELDS = [
     "timestamp",
@@ -19,14 +18,22 @@ CSV_FIELDS = [
 ]
 
 
-def log_readings(readings: list[SensorReading]) -> Path:
-    """Append sensor readings to the SPECTRE CSV log."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+def log_readings(readings: list[SensorReading]) -> Path | None:
+    """Append sensor readings to the configured CSV log."""
+    settings = load_settings()
+    logging_settings = settings["logging"]
 
-    file_exists = LOG_FILE.exists()
-    needs_header = not file_exists or LOG_FILE.stat().st_size == 0
+    if not logging_settings["enabled"]:
+        return None
 
-    with LOG_FILE.open("a", newline="", encoding="utf-8") as file:
+    data_dir = Path(__file__).parent / logging_settings["directory"]
+    log_file = data_dir / logging_settings["filename"]
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    needs_header = not log_file.exists() or log_file.stat().st_size == 0
+
+    with log_file.open("a", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
 
         if needs_header:
@@ -42,7 +49,7 @@ def log_readings(readings: list[SensorReading]) -> Path:
                 "simulated": reading.simulated,
             })
 
-    return LOG_FILE
+    return log_file
 
 
 if __name__ == "__main__":
@@ -51,5 +58,8 @@ if __name__ == "__main__":
     readings = generate_readings()
     saved_path = log_readings(readings)
 
-    print(f"SPECTRE: logged {len(readings)} simulated readings.")
-    print(f"File: {saved_path.resolve()}")
+    if saved_path is None:
+        print("SPECTRE: logging is disabled in config.json.")
+    else:
+        print(f"SPECTRE: logged {len(readings)} simulated readings.")
+        print(f"File: {saved_path.resolve()}")
